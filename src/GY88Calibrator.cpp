@@ -229,7 +229,7 @@ int main()
         offsetGyro[2] = 18;
 
         // TODO: richiedere in input le calibrazioni da eseguire
-        //calibrateAll();
+        // calibrateAll();
         while(!mpu.getIntDataReadyStatus());
         mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
                        gyro + 2);
