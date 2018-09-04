@@ -317,6 +317,9 @@ bool I2Cdev::writeBitsW(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint
 bool I2Cdev::writeByte(uint8_t devAddr, uint8_t regAddr, uint8_t data) {
     return writeBytes(devAddr, regAddr, 1, &data);
 }
+bool I2Cdev::writeCmd(uint8_t devAddr, uint8_t regAddr) {
+    return writeBytes(devAddr, regAddr, 0, 0);
+}
 
 /** Write single word to a 16-bit device register.
  * @param devAddr I2C slave device address
@@ -356,7 +359,9 @@ bool I2Cdev::writeBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_
         return(FALSE);
     }
     buf[0] = regAddr;
-    memcpy(buf+1,data,length);
+    if(length > 0) {
+        memcpy(buf+1,data,length);
+    }
     count = write(fd, buf, length+1);
     if (count < 0) {
         fprintf(stderr, "Failed to write device(%d): %s\n", count, ::strerror(errno));

@@ -346,18 +346,18 @@ void readGps() {
         for(int i = 0; i < 1000; i++) {
             char next_char = my_serial_port.ReadByte(timeout_ms );
             gps.encode(next_char);
-//            cout << next_char;
+            cout << next_char;
         }
-        cout << "#Sat(" << gps.satellites.value() << ", " << gps.satellites.isValid() << ")" << endl;
-        cout << "HDOP(" << gps.hdop.hdop() << ", " << gps.hdop.isValid() << ")" << endl;
-        cout << "LAT(" << gps.location.lat()<< ", " << gps.location.isValid() << ")" << endl;
-        cout << "LNG(" << gps.location.lng()<< ", " <<  gps.location.isValid()<< ")" << endl;
-        cout << "AGE(" << gps.location.age()<< ", " << gps.location.isValid() << ")" << endl;
-        cout << "DATE(" << gps.date.year() << "/"<< uint16_t(gps.date.month())<< "/"<< uint16_t(gps.date.day())<< " " << uint16_t(gps.time.hour()) << ":" << uint16_t(gps.time.minute()) << ":" << uint16_t(gps.time.second()) << ":" << uint16_t(gps.time.centisecond()) <<")" << endl;
-        cout << "ALT(" << gps.altitude.meters() << ", "<< gps.altitude.isValid() << ")" << endl;
-        cout << "DEG(" << gps.course.deg() << ", " << gps.course.isValid() << ")" << endl;
-        cout << "KM/H(" << gps.speed.kmph() << ", " << gps.speed.isValid() << ")" << endl;
-        cout << "CARD(" << (gps.course.isValid() ? TinyGPSPlus::cardinal(gps.course.deg()) : "*** ") << ")" << endl;
+//        cout << "#Sat(" << gps.satellites.value() << ", " << gps.satellites.isValid() << ")" << endl;
+//        cout << "HDOP(" << gps.hdop.hdop() << ", " << gps.hdop.isValid() << ")" << endl;
+//        cout << "LAT(" << gps.location.lat()<< ", " << gps.location.isValid() << ")" << endl;
+//        cout << "LNG(" << gps.location.lng()<< ", " <<  gps.location.isValid()<< ")" << endl;
+//        cout << "AGE(" << gps.location.age()<< ", " << gps.location.isValid() << ")" << endl;
+//        cout << "DATE(" << gps.date.year() << "/"<< uint16_t(gps.date.month())<< "/"<< uint16_t(gps.date.day())<< " " << uint16_t(gps.time.hour()) << ":" << uint16_t(gps.time.minute()) << ":" << uint16_t(gps.time.second()) << ":" << uint16_t(gps.time.centisecond()) <<")" << endl;
+//        cout << "ALT(" << gps.altitude.meters() << ", "<< gps.altitude.isValid() << ")" << endl;
+//        cout << "DEG(" << gps.course.deg() << ", " << gps.course.isValid() << ")" << endl;
+//        cout << "KM/H(" << gps.speed.kmph() << ", " << gps.speed.isValid() << ")" << endl;
+//        cout << "CARD(" << (gps.course.isValid() ? TinyGPSPlus::cardinal(gps.course.deg()) : "*** ") << ")" << endl;
     }
 }
 
