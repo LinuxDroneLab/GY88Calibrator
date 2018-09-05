@@ -14,6 +14,7 @@
 #include <SerialPort.h>
 #include <SerialStream.h>
 #include <drivers/TinyGPS++.h>
+#include <drivers/MS5611.h>
 
 using namespace std;
 
@@ -322,7 +323,18 @@ void trackAll()
         cout << "Sorry!! MPU6050 not connected" << endl;
     }
 }
+void readMS5611() {
+    MS5611 ms5611;
+    while(true) {
+        if(ms5611.pulse()) {
+            cout << "P[" << (ms5611.getData().pressure) << ", " << (uint32_t)(ms5611.getData().rawPressure) << "]"
+                 << "T[" << ms5611.getData().temperature << ", " << (uint32_t)(ms5611.getData().rawTemperature) << "]"
+                 << "A[" << ms5611.getAltitude(ms5611.getData().pressure, double(MS5611_SEALEVEL_PRESSURE)) << "]"
+                 << endl;
+        }
+    }
 
+}
 void readGps() {
     TinyGPSPlus gps;
     using namespace LibSerial;
@@ -388,6 +400,10 @@ int main(int argc, char* argv[])
     else if (strcmp(argv[1], "-gps") == 0)
     {
         readGps();
+    }
+    else if (strcmp(argv[1], "-ms5611") == 0)
+    {
+        readMS5611();
     }
     return 0;
 }

@@ -17,6 +17,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 #include <math.h>
 
 #include <drivers/MS5611.h>
@@ -27,6 +28,26 @@ bool MS5611::begin(ms5611_osr_t osr)
     reset();
 
     setOversampling(osr);
+
+    data.altitude = 0.0f;
+    data.dtimeMillis = 0;
+    data.pressure = 0.0f;
+    data.rawPressure = 0;
+    data.rawTemperature = 0;
+    data.seaLevelPressure = MS5611_SEALEVEL_PRESSURE;
+    data.temperature = 0.0f;
+    data.timestamp = boost::posix_time::microsec_clock::local_time();
+
+    status = MS5611_none;
+    this->discardSamples = 3000;
+    this->pressureCycles = 0;
+    this->pressureValueFast = 0.0f;
+    this->pressureValueSlow = 0.0f;
+    this->pressureBufferPosition = 0.0f;
+    for(uint8_t i = 0; i < MS5611_MAX_PRESSURE_CYCLES; i++) {
+        pressureBuffer[i] = 0;
+    }
+
     this->initialized = true;
     return initialized;
 }
@@ -70,24 +91,39 @@ void MS5611::reset(void)
 
 void MS5611::readPROM(void)
 {
+    std::cout << "Reading PROM" << std::endl;
     for (uint8_t offset = 0; offset < 6; offset++)
     {
 	fc[offset] = read16(MS5611_CMD_READ_PROM + (offset * 2));
+	std::cout << "fc[" << uint16_t(offset) << "]=" << fc[uint16_t(offset)] << " ";
     }
+    std::cout << std::endl;
 }
 
 uint8_t MS5611::getConversionTime() {
-    uint8_t waitMillis = 0;
-    if (this->uosr == MS5611_ULTRA_LOW_POWER)
+    uint8_t waitMillis = 10;
+    switch(this->uosr) {
+    case MS5611_ULTRA_LOW_POWER: {
         waitMillis = 1;
-    else if (this->uosr == MS5611_LOW_POWER)
+        break;
+    }
+    case MS5611_LOW_POWER: {
         waitMillis = 2;
-    else if (this->uosr == MS5611_STANDARD)
+        break;
+    }
+    case MS5611_STANDARD: {
         waitMillis = 3;
-    else if (this->uosr == MS5611_HIGH_RES)
+        break;
+    }
+    case MS5611_HIGH_RES: {
         waitMillis = 5;
-    else
+        break;
+    }
+    case MS5611_ULTRA_HIGH_RES: {
         waitMillis = 10;
+        break;
+    }
+    }
     return waitMillis;
 }
 // state machine based on ticks
@@ -114,7 +150,7 @@ bool MS5611::pulse() {
             break;
         }
         case MS5611_waitTemperature: {
-            if (calcMillisFrom(statusAtTime) >= this->getOversampling()) {
+            if (calcMillisFrom(statusAtTime) >= this->getConversionTime()) {
                 data.rawTemperature = readRawTemperature();
                 data.temperature = calcTemperature(data.rawTemperature, true);
                 changeStatus(MS5611_requirePressure);
@@ -127,7 +163,7 @@ bool MS5611::pulse() {
             break;
         }
         case MS5611_waitPressure: {
-            if (calcMillisFrom(statusAtTime) >= this->getOversampling()) {
+            if (calcMillisFrom(statusAtTime) >= this->getConversionTime()) {
                 boost::posix_time::ptime prev = data.timestamp;
                 data.timestamp = boost::posix_time::microsec_clock::local_time();
                 data.dtimeMillis = data.timestamp.time_of_day().total_milliseconds() - prev.time_of_day().total_milliseconds();
@@ -180,10 +216,11 @@ uint32_t MS5611::readRawTemperature(void)
 
 uint32_t MS5611::readRawPressure(void)
 {
-    return read24(MS5611_CMD_ADC_READ);
+    uint32_t result =  read24(MS5611_CMD_ADC_READ);
+    return result;
 }
 
-int32_t MS5611::calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensation) {
+double MS5611::calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensation) {
     int32_t dT = rawTemp - (uint32_t)fc[4] * 256;
 
     int64_t OFF = (int64_t)fc[1] * 65536 + (int64_t)fc[3] * dT / 128;
@@ -213,8 +250,11 @@ int32_t MS5611::calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensat
     }
 
     uint32_t P = (rawPress * SENS / 2097152 - OFF) / 32768;
+    this->pushPressure(P);
+    this->calcPressureFast();
+    this->calcPressureSlow();
 
-    return P;
+    return this->pressureValueSlow;
 }
 double MS5611::calcTemperature(uint32_t rawTemp, bool compensation) {
     int32_t dT = rawTemp - (uint32_t)fc[4] * 256;
@@ -232,7 +272,7 @@ double MS5611::calcTemperature(uint32_t rawTemp, bool compensation) {
     TEMP = TEMP - TEMP2;
     return ((double)TEMP/100);
 }
-int32_t MS5611::readPressure(bool compensation)
+uint32_t MS5611::readPressure(bool compensation)
 {
     uint32_t D1 = readRawPressure();
     uint32_t D2 = data.rawTemperature;
@@ -247,7 +287,13 @@ double MS5611::readTemperature(bool compensation)
 // Calculate altitude from Pressure & Sea level pressure
 double MS5611::getAltitude(double pressure, double seaLevelPressure)
 {
-    return (44330.0f * (1.0f - pow((double)pressure / (double)seaLevelPressure, 0.1902949f)));
+    double newAltitude = (44330.0f * (1.0f - pow((double)pressure / (double)seaLevelPressure, 0.1902949f)));
+    if(data.altitude > 0.01f) {
+        data.altitude = data.altitude * 0.95f + newAltitude * 0.05f;
+    } else {
+        data.altitude = newAltitude;
+    }
+    return data.altitude;
 }
 
 // Calculate sea level from Pressure given on specific altitude
@@ -289,10 +335,46 @@ uint16_t MS5611::read16(uint8_t a) {
     ret = ((uint16_t) __buff[0]) << 8 | ((uint16_t) __buff[1]);
     return ret;
 }
-uint16_t MS5611::read24(uint8_t a) {
+uint32_t MS5611::read24(uint8_t a) {
     uint32_t ret;
     uint8_t __buff[3] = { 0, 0, 0 };
     readmem(a, 3, __buff);
     ret = ((uint32_t) __buff[0]) << 16 | ((uint32_t) __buff[1]) << 8 | ((uint32_t) __buff[2]);
     return ret;
 }
+void MS5611::pushPressure(uint32_t pressure) {
+    this->pressureBuffer[this->pressureBufferPosition] = pressure;
+    this->pressureBufferPosition++;
+    this->pressureBufferPosition %= MS5611_MAX_PRESSURE_CYCLES;
+}
+void MS5611::calcPressureSlow() {
+    this->pressureValueSlow = this->pressureValueSlow * 0.985 + this->pressureValueFast * 0.015;
+
+    float pressureDiff = std::max<float>(-8.0f, std::min<float>(8.0f, this->pressureValueSlow - this->pressureValueFast));
+    if(pressureDiff < -1 || pressureDiff > 1) {
+        this->pressureValueSlow -= pressureDiff / 6.0f;
+    }
+
+}
+void MS5611::calcPressureFast() {
+    uint8_t samples = 0;
+    int32_t sum = 0;
+    int32_t sample = 0;
+    for(uint8_t i = 0; i < MS5611_MAX_PRESSURE_CYCLES; i++) {
+        sample=this->pressureBuffer[(this->pressureBufferPosition + i) % MS5611_MAX_PRESSURE_CYCLES];
+        if(sample == 0) {
+            break;
+        }
+        samples++;
+        sum += sample;
+    }
+    if(samples != 0) {
+        this->pressureValueFast = sum/float(samples);
+    } else {
+        this->pressureValueFast = 0.0f;
+    }
+    if(this->pressureValueSlow == 0.0f) {
+        this->pressureValueSlow = this->pressureValueFast;
+    }
+}
+

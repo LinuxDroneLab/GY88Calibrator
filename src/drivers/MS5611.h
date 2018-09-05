@@ -35,6 +35,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define MS5611_CMD_READ_PROM          (0xA2)
 
 #define MS5611_MAX_PRESSURE_CYCLES 20
+#define MS5611_SEALEVEL_PRESSURE 101500
 
 typedef enum
 {
@@ -52,7 +53,7 @@ class MS5611
         uint32_t rawTemperature;
         uint32_t rawPressure;
         double temperature; // gradi centigradi
-        int32_t pressure; // Pa
+        double pressure; // Pa
         int32_t seaLevelPressure; // Pa
         double altitude; // meters
         boost::posix_time::ptime timestamp;
@@ -66,9 +67,9 @@ class MS5611
     void sendRawTemperatureCmd(void);
     void sendRawPressureCmd(void);
 	double readTemperature(bool compensation = false);
-	int32_t readPressure(bool compensation = false);
+	uint32_t readPressure(bool compensation = false);
     double calcTemperature(uint32_t rawTemp, bool compensation = false);
-    int32_t calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensation = false);
+    double calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensation = false);
 	double getAltitude(double pressure, double seaLevelPressure = 101325);
 	double getSeaLevel(double pressure, double altitude);
 	void setOversampling(ms5611_osr_t osr);
@@ -85,12 +86,20 @@ class MS5611
 	int32_t TEMP2;
 	int64_t OFF2, SENS2;
 
+    uint32_t pressureBuffer[MS5611_MAX_PRESSURE_CYCLES];
+    uint8_t pressureBufferPosition;
+    double pressureValueSlow;
+    double pressureValueFast;
+    void pushPressure(uint32_t pressure);
+    void calcPressureSlow();
+    void calcPressureFast();
+
 	void reset(void);
 	void readPROM(void);
 
     uint8_t read8(uint8_t addr);
     uint16_t read16(uint8_t addr);
-    uint16_t read24(uint8_t addr);
+    uint32_t read24(uint8_t addr);
     void write8(uint8_t addr, uint8_t data);
     void readmem(uint8_t _addr, uint8_t _nbytes, uint8_t __buff[]);
     void writemem(uint8_t _addr, uint8_t _val);
