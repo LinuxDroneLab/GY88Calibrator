@@ -288,11 +288,7 @@ double MS5611::readTemperature(bool compensation)
 double MS5611::getAltitude(double pressure, double seaLevelPressure)
 {
     double newAltitude = (44330.0f * (1.0f - pow((double)pressure / (double)seaLevelPressure, 0.1902949f)));
-    if(data.altitude > 0.01f) {
-        data.altitude = data.altitude * 0.95f + newAltitude * 0.05f;
-    } else {
-        data.altitude = newAltitude;
-    }
+    data.altitude = newAltitude;
     return data.altitude;
 }
 
@@ -348,18 +344,18 @@ void MS5611::pushPressure(uint32_t pressure) {
     this->pressureBufferPosition %= MS5611_MAX_PRESSURE_CYCLES;
 }
 void MS5611::calcPressureSlow() {
-    this->pressureValueSlow = this->pressureValueSlow * 0.985 + this->pressureValueFast * 0.015;
+    this->pressureValueSlow = this->pressureValueSlow * 0.975 + this->pressureValueFast * 0.025;
 
-    float pressureDiff = std::max<float>(-8.0f, std::min<float>(8.0f, this->pressureValueSlow - this->pressureValueFast));
-    if(pressureDiff < -1 || pressureDiff > 1) {
-        this->pressureValueSlow -= pressureDiff / 6.0f;
-    }
+//    double pressureDiff = std::max<double>(-8.0, std::min<double>(8.0, this->pressureValueSlow - this->pressureValueFast));
+//    if(pressureDiff < -1 || pressureDiff > 1) {
+//        this->pressureValueSlow -= pressureDiff / 6.0f;
+//    }
 
 }
 void MS5611::calcPressureFast() {
     uint8_t samples = 0;
-    int32_t sum = 0;
-    int32_t sample = 0;
+    uint32_t sum = 0;
+    uint32_t sample = 0;
     for(uint8_t i = 0; i < MS5611_MAX_PRESSURE_CYCLES; i++) {
         sample=this->pressureBuffer[(this->pressureBufferPosition + i) % MS5611_MAX_PRESSURE_CYCLES];
         if(sample == 0) {
