@@ -35,7 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define MS5611_CMD_READ_PROM          (0xA2)
 
 #define MS5611_MAX_PRESSURE_CYCLES 20
-#define MS5611_SEALEVEL_PRESSURE 101500
+//#define MS5611_SEALEVEL_PRESSURE 101500
+#define MS5611_SEALEVEL_PRESSURE 101660
 
 typedef enum
 {

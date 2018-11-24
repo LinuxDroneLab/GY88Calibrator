@@ -250,11 +250,12 @@ double MS5611::calcPressure(uint32_t rawPress, uint32_t rawTemp, bool compensati
     }
 
     uint32_t P = (rawPress * SENS / 2097152 - OFF) / 32768;
-    this->pushPressure(P);
-    this->calcPressureFast();
-    this->calcPressureSlow();
+//    this->pushPressure(P);
+//    this->calcPressureFast();
+//    this->calcPressureSlow();
+//    return this->pressureValueSlow;
+    return P;
 
-    return this->pressureValueSlow;
 }
 double MS5611::calcTemperature(uint32_t rawTemp, bool compensation) {
     int32_t dT = rawTemp - (uint32_t)fc[4] * 256;
