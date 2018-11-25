@@ -239,8 +239,8 @@ void calcRollPitch()
     pitchDeg += rollDeg * sin(gyro[2] * 0.000001066); // 0.0000611 * (2pi)/360
     rollDeg -= pitchDeg * sin(gyro[2] * 0.000001066);
 
-    pitchDeg = pitchDeg * 0.9991 + pitchDegAcc * 0.0009;
-    rollDeg = rollDeg * 0.9991 + rollDegAcc * 0.0009;
+    pitchDeg = pitchDeg * 0.9999 + pitchDegAcc * 0.0001;
+    rollDeg = rollDeg * 0.9999 + rollDegAcc * 0.0001;
 
     {
         // Abbreviations for the various angular functions
@@ -248,8 +248,8 @@ void calcRollPitch()
         double sy = sin(yawDeg * 0.017453293f * 0.5);
         double cr = cos(rollDeg * 0.017453293f * 0.5);
         double sr = sin(rollDeg * 0.017453293f * 0.5);
-        double cp = cos(pitchDeg * 0.017453293f * 0.5);
-        double sp = sin(pitchDeg * 0.017453293f * 0.5);
+        double cp = cos(-pitchDeg * 0.017453293f * 0.5);
+        double sp = sin(-pitchDeg * 0.017453293f * 0.5);
 
         q.w = cy * cr * cp + sy * sr * sp;
         q.x = cy * sr * cp - sy * cr * sp;
@@ -290,7 +290,7 @@ void trackAll()
          */
         axisOffsetAccel[0] = -309.5f;
         axisOffsetAccel[1] = 128.5f;
-        axisOffsetAccel[2] = -459.0f;
+        axisOffsetAccel[2] = -394.0f;
         axisFactorAccel[0] = 1.00868f;
         axisFactorAccel[1] = 1.00288f;
         axisFactorAccel[2] = 0.98794f;
@@ -300,6 +300,10 @@ void trackAll()
         offsetGyro[0] = -394;
         offsetGyro[1] = -59;
         offsetGyro[2] = 12;
+
+        KalmanFilter kf[3] = { KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
+                               KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
+                               KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0) };
 
         // TODO: richiedere in input le calibrazioni da eseguire
         while (!mpu.getIntDataReadyStatus())
@@ -333,16 +337,32 @@ void trackAll()
                     {
                         gyro[i] = 0;
                     }
-                    float accelTmp = float(prevAccel[i]) * (1.0f - k[i])
-                            + float((accel[i]) * axisFactorAccel[i]
-                                    + axisOffsetAccel[i]) * k[i];
+                    // sostituito con il kalman filter
+//                    float accelTmp = float(prevAccel[i]) * (1.0f - k[i])
+//                            + float((accel[i]) * axisFactorAccel[i]
+//                                    + axisOffsetAccel[i]) * k[i];
+                    float accelTmp = accel[i] = round<int16_t>(kf[i].compute(
+                            float(accel[i]) * axisFactorAccel[i]
+                                    + axisOffsetAccel[i]));
+
                     accel[i] = int16_t(accelTmp);
                     prevAccel[i] = accel[i];
                 }
                 // calcolo roll e pitch
-                // per lo yaw vedo dopo ...
                 calcRollPitchAccel();
                 calcRollPitch();
+
+                VectorInt16 accelInWorld(accel[0], accel[1], accel[2]);
+                accelInWorld.rotate(&q);
+                if(counter == 0) {
+                    cout << "WX[" << accelInWorld.x << "], WY[" << accelInWorld.y << "], WZ[" << accelInWorld.z << "], AZ[" << accel[2] << "]"<< endl;
+                }
+                double acc = (double(accelInWorld.z) / 8192.0f - 1.0f) * 9.7803f;
+                if (counter == 0)
+                {
+                    cout << "AXYZ(" << accel[0] << ",  "<< accel[1] << ",  "<< accel[2] << "),  " << acc << ", Roll=[" << rollDeg
+                            << "], Pitch=[" << pitchDeg << "], gyroZ=[" << gyro[2] << "], gyroY=[" << gyro[1] << "], gyroX=[" << gyro[0] << "]"<< endl;
+                }
 
                 if (counter == 0)
                 {
@@ -445,8 +465,8 @@ void trackAltitude()
             {
                 gyro[i] = 0;
             }
-            prevAccel[i] = kf[i].compute(
-                    float(accel[i]) * axisFactorAccel[i] + axisOffsetAccel[i]);
+            prevAccel[i] = round<int16_t>(kf[i].compute(
+                    float(accel[i]) * axisFactorAccel[i] + axisOffsetAccel[i]));
         }
         calcRollPitchAccel();
         pitchDeg = pitchDegAcc;
@@ -468,9 +488,9 @@ void trackAltitude()
                         gyro[i] = 0;
                     }
                     prevAccel[i] = accel[i];
-                    accel[i] = kf[i].compute(
+                    accel[i] = round<int16_t>(kf[i].compute(
                             float(accel[i]) * axisFactorAccel[i]
-                                    + axisOffsetAccel[i]);
+                                    + axisOffsetAccel[i]));
                     calcRollPitchAccel();
                     calcRollPitch();
                 }
@@ -504,7 +524,7 @@ void trackAltitude()
                             << "], acc=[" << accel[2] << "]" << endl;
                 }
                 counter++;
-                counter %= 100;
+                counter %= 250;
             }
         }
     }
