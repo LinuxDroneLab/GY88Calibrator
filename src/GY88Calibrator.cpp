@@ -277,6 +277,8 @@ void calibrateAll()
 
 void trackAll()
 {
+    MS5611 ms5611;
+
     if (mpu.testConnection())
     {
         /*
@@ -305,6 +307,31 @@ void trackAll()
                                KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
                                KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0) };
 
+        KalmanFilter kfAlt(0.000001, 0.70, 1.0, 115.0, 0.0);
+
+        // stabilizzazione iniziale
+        for (uint16_t i = 0; i < 2000; i++)
+        {
+            while (!mpu.getIntDataReadyStatus())
+                ;
+            mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
+                           gyro + 2);
+
+            for (int i = 0; i < 3; i++)
+            {
+                kf[i].compute(
+                        float(accel[i]) * axisFactorAccel[i]
+                                + axisOffsetAccel[i]);
+            }
+            if (ms5611.pulse())
+            {
+                kfAlt.compute(
+                        ms5611.getAltitude(ms5611.getData().pressure,
+                                           double(MS5611_SEALEVEL_PRESSURE)));
+            }
+
+        }
+
         // TODO: richiedere in input le calibrazioni da eseguire
         while (!mpu.getIntDataReadyStatus())
             ;
@@ -321,9 +348,37 @@ void trackAll()
         rollDeg = rollDegAcc;
         yawDeg = 0;
 
+        double altitudeBaro = 0.0f;
+        double altitudeBaroPrev = 0.0f;
+        double altitudeAcc = 0.0f;
+        double altitudeAccPrev = 0.0f;
+        double speed = 0.0f;
+        bool baroOutput = false;
+        bool firstCycleBaro = true;
+        bool firstCycleAcc = true;
+        int16_t accOffsetZ = 0;
         uint8_t counter = 0;
         while (1)
         {
+            baroOutput = ms5611.pulse();
+            if (baroOutput)
+            {
+                altitudeBaroPrev = altitudeBaro;
+                altitudeAccPrev = altitudeAcc;
+                altitudeBaro = kfAlt.compute(
+                        ms5611.getAltitude(ms5611.getData().pressure,
+                                           double(MS5611_SEALEVEL_PRESSURE)));
+                if (firstCycleBaro)
+                {
+                    altitudeBaroPrev = altitudeBaro;
+                    altitudeAccPrev = altitudeBaro;
+                    altitudeAcc = altitudeBaro;
+                    cout << "AltBaro=[" << altitudeBaro << "], AltAcc=["
+                         << altitudeAcc << "]" << endl;
+                    baroOutput = false;
+                    firstCycleBaro = false;
+                }
+            }
             if (mpu.getIntDataReadyStatus())
             {
                 mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
@@ -337,13 +392,10 @@ void trackAll()
                     {
                         gyro[i] = 0;
                     }
-                    // sostituito con il kalman filter
-//                    float accelTmp = float(prevAccel[i]) * (1.0f - k[i])
-//                            + float((accel[i]) * axisFactorAccel[i]
-//                                    + axisOffsetAccel[i]) * k[i];
-                    float accelTmp = accel[i] = round<int16_t>(kf[i].compute(
-                            float(accel[i]) * axisFactorAccel[i]
-                                    + axisOffsetAccel[i]));
+                    float accelTmp = accel[i] = round<int16_t>(
+                            kf[i].compute(
+                                    float(accel[i]) * axisFactorAccel[i]
+                                            + axisOffsetAccel[i]));
 
                     accel[i] = int16_t(accelTmp);
                     prevAccel[i] = accel[i];
@@ -354,44 +406,35 @@ void trackAll()
 
                 VectorInt16 accelInWorld(accel[0], accel[1], accel[2]);
                 accelInWorld.rotate(&q);
-                if(counter == 0) {
-                    cout << "WX[" << accelInWorld.x << "], WY[" << accelInWorld.y << "], WZ[" << accelInWorld.z << "], AZ[" << accel[2] << "]"<< endl;
+                if (firstCycleAcc)
+                { // considero fermo
+                    accOffsetZ = 8192 - accelInWorld.z;
+                    firstCycleAcc = false;
                 }
-                double acc = (double(accelInWorld.z) / 8192.0f - 1.0f) * 9.7803f;
-                if (counter == 0)
+                double acc = (double(accelInWorld.z + accOffsetZ) / 8192.0f
+                        - 1.0f);
+                if (baroOutput)
                 {
-                    cout << "AXYZ(" << accel[0] << ",  "<< accel[1] << ",  "<< accel[2] << "),  " << acc << ", Roll=[" << rollDeg
-                            << "], Pitch=[" << pitchDeg << "], gyroZ=[" << gyro[2] << "], gyroY=[" << gyro[1] << "], gyroX=[" << gyro[0] << "]"<< endl;
+                    double velBaro = (altitudeBaro - altitudeBaroPrev)
+                            / (float(counter) * 0.004);
+                    speed = velBaro * 0.009 + speed * 0.991;
+                    uint16_t c = counter;
+                    altitudeAcc = altitudeBaro * 0.003 + altitudeAcc * 0.997;
+                    cout << "Acc=[" << acc << "], " << "Count=[" << c << "], "
+                         << "speed=[" << speed << "], VelBaro=[" << velBaro
+                         << "], AltBaro=[" << altitudeBaro << "], AltAcc=["
+                         << altitudeAcc << "]" << endl;
+                    counter = 1;
+                    baroOutput = false;
+                }
+                else
+                {
+                    counter++;
+                    double velAcc = acc * 9.7803f * 0.004; // ignore v0; 0.004 = 1/250Hz = dt;
+                    speed += velAcc;
+                    altitudeAcc = altitudeAcc + speed * 0.004;
                 }
 
-                if (counter == 0)
-                {
-//                    cout << "Acc(" << accel[0] << "," << accel[1] << "," << accel[2] << "), " << "Gyro(" << gyro[0] << "," << gyro[1] << "," << gyro[2] << ")"<< endl;
-                    cout << "RPAcc("
-                         << rollDegAcc
-                         << ", "
-                         << pitchDegAcc
-                         << "), RPY("
-                         << rollDeg
-                         << ", "
-                         << pitchDeg
-                         << ", "
-                         << yawDeg
-                         << "), "
-                         << " Temp("
-                         << float(temperature) / 340.0f + 36.53f
-                         << "), "
-                         << "Thrust["
-                         << int16_t(1500)
-                                 * (0.85f
-                                         + 0.15f
-                                                 / (cos(rollDeg * 0.017453293f)
-                                                         * cos(pitchDeg
-                                                                 * 0.017453293f)))
-                         << "]" << endl;
-                }
-                counter++;
-                counter %= 250;
             }
         }
     }
@@ -405,16 +448,12 @@ void trackAll()
 // si assume roll = pitch = 0;
 void trackAltitude()
 {
-
     if (mpu.testConnection())
     {
         // Estraggo 2000 campioni per stabilizzare il filtro di Kalman
         KalmanFilter kf[3] = { KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
                                KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
                                KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0) };
-        double speed[3] = { 0, 0, 0 }; // cm/sec
-        double position[3] = { 0, 0, 0 }; // cm
-
         /*
          * Accel: Mean(-7, -97, -8316), Min(-102, -194, -8508), Max(100, -22, -8228)
          * K=(0.00495049, 0.00581395. 0.00357143)
@@ -429,9 +468,6 @@ void trackAltitude()
         axisFactorAccel[0] = 1.00868f;
         axisFactorAccel[1] = 1.00288f;
         axisFactorAccel[2] = 0.98794f;
-        k[0] = 0.00625f;
-        k[1] = 0.008f;
-        k[2] = 0.00625f;
         offsetGyro[0] = -394;
         offsetGyro[1] = -59;
         offsetGyro[2] = 12;
@@ -465,16 +501,36 @@ void trackAltitude()
             {
                 gyro[i] = 0;
             }
-            prevAccel[i] = round<int16_t>(kf[i].compute(
-                    float(accel[i]) * axisFactorAccel[i] + axisOffsetAccel[i]));
+            prevAccel[i] = round<int16_t>(
+                    kf[i].compute(
+                            float(accel[i]) * axisFactorAccel[i]
+                                    + axisOffsetAccel[i]));
         }
         calcRollPitchAccel();
         pitchDeg = pitchDegAcc;
         rollDeg = rollDegAcc;
-
+        MS5611 ms5611;
+        double altitude, altitudePrev = 0.0f;
+        int32_t sumAccel = 0;
+        bool baroOutput = false;
         uint8_t counter = 0;
+
         while (1)
         {
+            baroOutput = ms5611.pulse();
+            if (baroOutput)
+            {
+                altitudePrev = altitude;
+                altitude = ms5611.getAltitude(ms5611.getData().pressure,
+                                              double(MS5611_SEALEVEL_PRESSURE));
+                if (altitudePrev == 0.0f)
+                {
+                    altitudePrev = altitude;
+                    sumAccel = 0;
+                    baroOutput = false;
+                }
+            }
+
             if (mpu.getIntDataReadyStatus())
             {
                 mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
@@ -488,43 +544,63 @@ void trackAltitude()
                         gyro[i] = 0;
                     }
                     prevAccel[i] = accel[i];
-                    accel[i] = round<int16_t>(kf[i].compute(
-                            float(accel[i]) * axisFactorAccel[i]
-                                    + axisOffsetAccel[i]));
+                    accel[i] = round<int16_t>(
+                            kf[i].compute(
+                                    float(accel[i]) * axisFactorAccel[i]
+                                            + axisOffsetAccel[i]));
                     calcRollPitchAccel();
                     calcRollPitch();
                 }
 
                 VectorInt16 accelInWorld(accel[0], accel[1], accel[2]);
                 accelInWorld.rotate(&q);
-                if(counter == 0) {
-                    cout << "WX[" << accelInWorld.x << "], WY[" << accelInWorld.y << "], WZ[" << accelInWorld.z << "]" << endl;
-                }
-                double acc = (double(accelInWorld.z) / 8192.0f - 1.0f) * 9.7803f;
-                if (counter == 0)
+//                if (counter == 0)
+//                {
+//                    cout << "WX[" << accelInWorld.x << "], WY["
+//                         << accelInWorld.y << "], WZ[" << accelInWorld.z << "]"
+//                         << endl;
+//                }
+                double acc = (double(accelInWorld.z) / 8192.0f - 1.0f)
+                        * 9.7803f;
+                if (baroOutput)
                 {
-                    cout << accel[2] << ",  " << acc << ", Roll=[" << rollDeg
-                            << "], Pitch=[" << pitchDeg << "], gyroZ=["
-                            << gyro[2] << "]" << endl;
+                    double velAcc = double(sumAccel) * float(counter) * 0.004; // ignore v0; 0.004 = 1/250Hz = dt;
+                    double velBaro = (altitude - altitudePrev)
+                            / (float(counter) * 0.004);
+                    counter = 0;
+                    cout << "VelAcc=[" << velAcc << "], VelBaro=[" << velBaro
+                         << "]" << endl;
+                    baroOutput = false;
                 }
-                float v = acc * 0.004; // 0.004 = 1/250Hz
-                speed[2] += v;
-                position[2] += speed[2] * 0.4; // in cm
-                if (acc == 0)
+                else
                 {
-                    speed[2] = speed[2] * 0.8f;
-                    if (abs<double>(speed[2]) < 0.02f)
-                    {
-                        speed[2] = 0.0f;
-                    }
+                    counter++;
+                    sumAccel += accelInWorld.z;
                 }
-                if (counter == 0)
-                {
-                    cout << "alt=[" << position[2] << "], speed=[" << speed[2]
-                            << "], acc=[" << accel[2] << "]" << endl;
-                }
-                counter++;
-                counter %= 250;
+//                if (counter == 0)
+//                {
+//                    cout << accel[2] << ",  " << acc << ", Roll=[" << rollDeg
+//                         << "], Pitch=[" << pitchDeg << "], gyroZ=[" << gyro[2]
+//                         << "]" << endl;
+//                }
+//                float v = acc * 0.004; // 0.004 = 1/250Hz
+//                speed[2] += v;
+//                position[2] += speed[2] * 0.4; // in cm
+//                if (acc == 0)
+//                {
+//                    speed[2] = speed[2] * 0.8f;
+//                    if (abs<double>(speed[2]) < 0.02f)
+//                    {
+//                        speed[2] = 0.0f;
+//                    }
+//                }
+//                if (counter == 0)
+//                {
+//                    cout << "alt=[" << position[2] << "], speed=[" << speed[2]
+//                         << "], acc=[" << accel[2] << "]" << endl;
+//                }
+//                counter++;
+//                counter %= 250;
             }
         }
     }
@@ -533,6 +609,136 @@ void trackAltitude()
         cout << "Sorry!! MPU6050 not connected" << endl;
     }
 }
+
+// IMU GY88:
+//X(-7982, 8310), Y(-8114, 8036), Z(-8255, 7467)
+//AxisFactors(1.00565, 1.01449, 1.04211)
+// Accel: Mean(-2, -128, -8280), Min(-69, -181, -8378), Max(53, -63, -8192)
+// K=(0.00819672, 0.00847458. 0.00537634)
+
+void trackAccAltitude()
+{
+    if (mpu.testConnection())
+    {
+        /*
+         * Accel AxisFactors(1.00868, 1.00288, 0.98794)
+         * Accel: X(-7812, 8431), Y(-8297, 8040), Z(-7919, 8665)
+         *
+         * Accel: Mean(157, -108, 8763), Min(82, -172, 8689), Max(242, -47, 8849)
+         * Accel: K=(0.00625, 0.008. 0.00625)
+         * Gyro Offsets(-394,-59,12)
+         *
+         */
+        axisOffsetAccel[0] = -309.5f;
+        axisOffsetAccel[1] = 128.5f;
+        axisOffsetAccel[2] = -394.0f;
+        axisFactorAccel[0] = 1.00868f;
+        axisFactorAccel[1] = 1.00288f;
+        axisFactorAccel[2] = 0.98794f;
+        k[0] = 0.00625f;
+        k[1] = 0.008f;
+        k[2] = 0.00625f;
+        offsetGyro[0] = -394;
+        offsetGyro[1] = -59;
+        offsetGyro[2] = 12;
+
+        KalmanFilter kf[3] = { KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
+                               KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0),
+                               KalmanFilter(0.0000005, 0.005, 1.0, 0.0, 0.0) };
+
+        // stabilizzazione iniziale
+        for (uint16_t i = 0; i < 2000; i++)
+        {
+            while (!mpu.getIntDataReadyStatus())
+                ;
+            mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
+                           gyro + 2);
+
+            for (int i = 0; i < 3; i++)
+            {
+                kf[i].compute(
+                        float(accel[i]) * axisFactorAccel[i]
+                                + axisOffsetAccel[i]);
+            }
+
+        }
+
+        // TODO: richiedere in input le calibrazioni da eseguire
+        while (!mpu.getIntDataReadyStatus())
+            ;
+        mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1, gyro + 2);
+
+        for (int i = 0; i < 3; i++)
+        {
+            prevAccel[i] = float(accel[i]) * axisFactorAccel[i]
+                    + axisOffsetAccel[i];
+        }
+        // calc initial roll & pitch (fro accel)
+        calcRollPitchAccel();
+        pitchDeg = pitchDegAcc;
+        rollDeg = rollDegAcc;
+        yawDeg = 0;
+
+        double altitudeAcc = 0.0f;
+        double speed = 0.0f;
+        int16_t accOffsetZ = 0;
+        uint8_t counter = 0;
+        bool firstCycleAcc = true;
+        while (1)
+        {
+            if (mpu.getIntDataReadyStatus())
+            {
+                mpu.getMotion6(accel, accel + 1, accel + 2, gyro, gyro + 1,
+                               gyro + 2);
+                temperature = mpu.getTemperature();
+                // aggiusto gyro e accel
+                for (int i = 0; i < 3; i++)
+                {
+                    gyro[i] -= offsetGyro[i];
+                    if (gyro[i] <= 3 && gyro[i] >= -3)
+                    {
+                        gyro[i] = 0;
+                    }
+                    float accelTmp = accel[i] = round<int16_t>(
+                            kf[i].compute(
+                                    float(accel[i]) * axisFactorAccel[i]
+                                            + axisOffsetAccel[i]));
+
+                    accel[i] = int16_t(accelTmp);
+                    prevAccel[i] = accel[i];
+                }
+                // calcolo roll e pitch
+                calcRollPitchAccel();
+                calcRollPitch();
+
+                VectorInt16 accelInWorld(accel[0], accel[1], accel[2]);
+                accelInWorld.rotate(&q);
+                if (firstCycleAcc)
+                { // considero fermo
+                    accOffsetZ = 8192 - accelInWorld.z;
+                    firstCycleAcc = false;
+                }
+                double acc = (double(accelInWorld.z + accOffsetZ) / 8192.0f
+                        - 1.0f);
+                counter++;
+                counter %= 100;
+                double velAcc = acc * 9.7803f * 0.004; // ignore v0; 0.004 = 1/250Hz = dt;
+                speed += velAcc;
+                altitudeAcc = altitudeAcc + speed * 0.004;
+                if (counter == 0)
+                {
+                    cout << "Acc=[" << acc << "], " << "speed=[" << speed
+                         << "], AltAcc=[" << altitudeAcc << "]" << endl;
+                }
+            }
+        }
+    }
+    else
+    {
+        cout << "Sorry!! MPU6050 not connected" << endl;
+    }
+}
+
 void readMS5611()
 {
     MS5611 ms5611;
@@ -635,6 +841,11 @@ int main(int argc, char* argv[])
     {
         mpu.initialize();
         trackAltitude();
+    }
+    else if (strcmp(argv[1], "-trackAccAltitude") == 0)
+    {
+        mpu.initialize();
+        trackAccAltitude();
     }
     return 0;
 }
