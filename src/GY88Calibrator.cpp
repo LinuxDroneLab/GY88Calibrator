@@ -310,7 +310,7 @@ void trackAll()
         KalmanFilter kfAlt(0.000001, 0.70, 1.0, 115.0, 0.0);
 
         // stabilizzazione iniziale
-        for (uint16_t i = 0; i < 2000; i++)
+        for (uint16_t s = 0; s < 10000; s++)
         {
             while (!mpu.getIntDataReadyStatus())
                 ;
@@ -348,10 +348,11 @@ void trackAll()
         rollDeg = rollDegAcc;
         yawDeg = 0;
 
-        double altitudeBaro = 0.0f;
-        double altitudeBaroPrev = 0.0f;
-        double altitudeAcc = 0.0f;
-        double altitudeAccPrev = 0.0f;
+        double altitudeBaro = kfAlt.compute(
+                ms5611.getAltitude(ms5611.getData().pressure,
+                                   double(MS5611_SEALEVEL_PRESSURE)));
+        double altitudeBaroPrev = altitudeBaro;
+        double altitudeAcc = altitudeBaro;
         double speed = 0.0f;
         bool baroOutput = false;
         bool firstCycleBaro = true;
@@ -364,14 +365,12 @@ void trackAll()
             if (baroOutput)
             {
                 altitudeBaroPrev = altitudeBaro;
-                altitudeAccPrev = altitudeAcc;
                 altitudeBaro = kfAlt.compute(
                         ms5611.getAltitude(ms5611.getData().pressure,
                                            double(MS5611_SEALEVEL_PRESSURE)));
                 if (firstCycleBaro)
                 {
                     altitudeBaroPrev = altitudeBaro;
-                    altitudeAccPrev = altitudeBaro;
                     altitudeAcc = altitudeBaro;
                     cout << "AltBaro=[" << altitudeBaro << "], AltAcc=["
                          << altitudeAcc << "]" << endl;
@@ -417,15 +416,16 @@ void trackAll()
                 {
                     double velBaro = (altitudeBaro - altitudeBaroPrev)
                             / (float(counter) * 0.004);
-                    speed = velBaro * 0.009 + speed * 0.991;
+                    speed = velBaro * 0.1 + speed * 0.9;
                     uint16_t c = counter;
-                    altitudeAcc = altitudeBaro * 0.003 + altitudeAcc * 0.997;
+                    altitudeAcc = altitudeBaro * 0.008 + altitudeAcc * 0.992;
                     cout << "Acc=[" << acc << "], " << "Count=[" << c << "], "
                          << "speed=[" << speed << "], VelBaro=[" << velBaro
                          << "], AltBaro=[" << altitudeBaro << "], AltAcc=["
                          << altitudeAcc << "]" << endl;
                     counter = 1;
                     baroOutput = false;
+
                 }
                 else
                 {
